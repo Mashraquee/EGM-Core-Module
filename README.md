@@ -37,3 +37,4 @@ Update current_version
 Update last_known_good_version
 
 Update current symlink (or pointer file)
+
