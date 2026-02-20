@@ -1,225 +1,221 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace EventLogging_State_Machine
+using System.IO;
+using System.Text.Json;
+using System.Diagnostics;
+namespace Implementation
 {
     internal class Program
     {
-        public enum MachineState
-        {
-            IDLE,
-            RUNNING,
-            MAINTENANCE,
-            UPDATING,
-            ERROR
-        }
-
-        public class EventLogger
-        {
-            public void Log(string message)
-            {
-                Console.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}");
-            }
-        }
-
-        public class StateMachine
-        {
-            private readonly EventLogger _logger;
-            public MachineState CurrentState { get; private set; }
-
-            public StateMachine(EventLogger logger)
-            {
-                _logger = logger;
-                CurrentState = MachineState.IDLE;
-                _logger.Log($"System initialized. Current state: {CurrentState}");
-            }
-
-            public void StartGame()
-            {
-                _logger.Log("Command received: start_game");
-
-                if (CurrentState == MachineState.IDLE)
-                {
-                    CurrentState = MachineState.RUNNING;
-                    _logger.Log("Transition: IDLE -> RUNNING");
-                }
-                else
-                {
-                    _logger.Log($"Invalid transition: Cannot start game from {CurrentState}");
-                }
-            }
-
-            public void StopGame()
-            {
-                _logger.Log("Command received: stop_game");
-
-                if (CurrentState == MachineState.RUNNING)
-                {
-                    CurrentState = MachineState.IDLE;
-                    _logger.Log("Transition: RUNNING -> IDLE");
-                }
-                else
-                {
-                    _logger.Log($"Invalid transition: Cannot stop game from {CurrentState}");
-                }
-            }
-
-            public void Signal(string signal)
-            {
-                _logger.Log($"Signal received: {signal}");
-
-                if (signal == "door_open")
-                {
-                    CurrentState = MachineState.MAINTENANCE;
-                    _logger.Log("Transition: -> MAINTENANCE (door opened)");
-                }
-                else if (signal == "door_close")
-                {
-                    CurrentState = MachineState.IDLE;
-                    _logger.Log("Transition: -> IDLE (door closed)");
-                }
-                else
-                {
-                    _logger.Log("Unknown signal.");
-                }
-            }
-
-            public void UpdatePackage(string packageName)
-            {
-                _logger.Log($"Update command received. Package: {packageName}");
-
-                if (CurrentState == MachineState.RUNNING)
-                {
-                    _logger.Log("Stopping game before update.");
-                    CurrentState = MachineState.IDLE;
-                }
-
-                CurrentState = MachineState.UPDATING;
-                _logger.Log("Transition: -> UPDATING");
-
-                // Simulate update process
-                System.Threading.Thread.Sleep(1000);
-
-                CurrentState = MachineState.IDLE;
-                _logger.Log("Update completed. Transition: UPDATING -> IDLE");
-            }
-
-            public void DeviceCommand(string device, string action, string value)
-            {
-                _logger.Log($"Device command received: {device} {action} {value}");
-
-                if (device == "bill_validator" && action == "ack")
-                {
-                    _logger.Log($"Bill validator ACK turned {value}");
-                }
-                else
-                {
-                    _logger.Log("Unknown device command.");
-                }
-            }
-
-            public void OsCommand(string command, string value)
-            {
-                _logger.Log($"OS command received: {command} {value}");
-
-                if (command == "set-timezone")
-                {
-                    _logger.Log($"Timezone set to {value}");
-                }
-                else
-                {
-                    _logger.Log("Unknown OS command.");
-                }
-            }
-
-            public void PrintStatus()
-            {
-                _logger.Log($"Current state: {CurrentState}");
-            }
-        }
-
-
+        static string GameRoot = Path.Combine(Directory.GetCurrentDirectory(), "GameRoot");
+        static string VersionsDir = Path.Combine(GameRoot, "versions");
+        static string CurrentVersionFile = Path.Combine(GameRoot, "current.txt");
+        static string LastKnownGoodFile = Path.Combine(GameRoot, "last_known_good.txt");
+        static string InstallHistoryLog = Path.Combine(GameRoot, "install_history.log");
         static void Main(string[] args)
         {
-            var logger = new EventLogger();
-            var stateMachine = new StateMachine(logger);
-
-            Console.WriteLine("CLI Simulation Harness Started.");
-            Console.WriteLine("Type 'exit' to quit.");
-
-            while (true)
+            if (args.Length < 2 || args[0] != "update" || args[1] != "--package")
             {
-                Console.Write("> ");
-                var input = Console.ReadLine();
-
-                if (string.IsNullOrWhiteSpace(input))
-                    continue;
-
-                if (input == "exit")
-                    break;
-
-                var tokens = input.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
-
-                try
-                {
-                    switch (tokens[0])
-                    {
-                        case "start_game":
-                            stateMachine.StartGame();
-                            break;
-
-                        case "stop_game":
-                            stateMachine.StopGame();
-                            break;
-
-                        case "signal":
-                            if (tokens.Length >= 2)
-                                stateMachine.Signal(tokens[1]);
-                            break;
-
-                        case "update":
-                            if (tokens.Length >= 3 && tokens[1] == "--package")
-                                stateMachine.UpdatePackage(tokens[2]);
-                            break;
-
-                        case "device":
-                            if (tokens.Length >= 4)
-                                stateMachine.DeviceCommand(tokens[1], tokens[2], tokens[3]);
-                            break;
-
-                        case "os":
-                            if (tokens.Length >= 3)
-                                stateMachine.OsCommand(tokens[1], tokens[2]);
-                            break;
-
-                        case "status":
-                            stateMachine.PrintStatus();
-                            break;
-
-                        default:
-                            logger.Log("Unknown command.");
-                            break;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.Log($"ERROR: {ex.Message}");
-                }
+                Console.WriteLine("Usage: update --package <path>");
+                return;
             }
 
-            logger.Log("System shutting down.");
+            string packagePath = args[2];
+
+            try
+            {
+                UpdateGame(packagePath);
+            }
+            catch (Exception ex)
+            {
+                Log($"FATAL ERROR: {ex.Message}");
+            }
+        }
+
+        static void UpdateGame(string packagePath)
+        {
+            Log("----- Starting Update Process -----");
+
+            if (!Directory.Exists(packagePath))
+                throw new Exception("Update package not found.");
+
+            string manifestPath = Path.Combine(packagePath, "manifest.json");
+
+            if (!File.Exists(manifestPath))
+                throw new Exception("Manifest file missing.");
+
+            var manifestJson = File.ReadAllText(manifestPath);
+            var manifest = JsonSerializer.Deserialize<Manifest>(manifestJson);
+
+            if (string.IsNullOrWhiteSpace(manifest.Version))
+                throw new Exception("Invalid manifest: version missing.");
+
+            Log($"Validated package for version: {manifest.Version}");
+
+            string newVersionPath = Path.Combine(VersionsDir, manifest.Version);
+
+            // Run Pre-Install Script
+            if (!RunPreInstall(packagePath))
+            {
+                Log("Pre-install failed. Rolling back...");
+                Rollback();
+                return;
+            }
+
+            // Copy files
+            string sourceFiles = Path.Combine(packagePath, "files");
+            if (!Directory.Exists(sourceFiles))
+                throw new Exception("Package files directory missing.");
+
+            if (Directory.Exists(newVersionPath))
+                Directory.Delete(newVersionPath, true);
+
+            CopyDirectory(sourceFiles, newVersionPath);
+            Log($"Copied files to {newVersionPath}");
+
+            // Update version pointers
+            string currentVersion = GetCurrentVersion();
+
+            File.WriteAllText(CurrentVersionFile, manifest.Version);
+            File.WriteAllText(LastKnownGoodFile, manifest.Version);
+
+            Log($"Update successful. Active version: {manifest.Version}");
+            Log("----- Update Complete -----\n");
+        }
+
+        static bool RunPreInstall(string packagePath)
+        {
+            try
+            {
+                string scriptFile = Path.Combine(packagePath, "preinstall.txt");
+
+                if (!File.Exists(scriptFile))
+                {
+                    Log("No pre-install script found. Skipping.");
+                    return true;
+                }
+
+                string scriptCommand = File.ReadAllText(scriptFile);
+
+                Log($"Running pre-install: {scriptCommand}");
+
+                Process process = new Process();
+                process.StartInfo.FileName = "cmd.exe";
+                process.StartInfo.Arguments = $"/c {scriptCommand}";
+                process.StartInfo.RedirectStandardOutput = true;
+                process.StartInfo.UseShellExecute = false;
+                process.Start();
+
+                process.WaitForExit();
+
+                Log($"Pre-install exit code: {process.ExitCode}");
+
+                return process.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                Log($"Pre-install exception: {ex.Message}");
+                return false;
+            }
+        }
+
+        static void Rollback()
+        {
+            string lastGood = GetLastKnownGoodVersion();
+
+            if (string.IsNullOrEmpty(lastGood))
+            {
+                Log("No last known good version found. Cannot rollback.");
+                return;
+            }
+
+            File.WriteAllText(CurrentVersionFile, lastGood);
+            Log($"Rolled back to version: {lastGood}");
+            Log("----- Rollback Complete -----\n");
+        }
+
+        static string GetCurrentVersion()
+        {
+            if (!File.Exists(CurrentVersionFile))
+                return null;
+
+            return File.ReadAllText(CurrentVersionFile).Trim();
+        }
+
+        static string GetLastKnownGoodVersion()
+        {
+            if (!File.Exists(LastKnownGoodFile))
+                return null;
+
+            return File.ReadAllText(LastKnownGoodFile).Trim();
+        }
+
+        static void Log(string message)
+        {
+            string logEntry = $"[{DateTime.Now}] {message}";
+            Console.WriteLine(logEntry);
+            Directory.CreateDirectory(GameRoot);
+            File.AppendAllText(InstallHistoryLog, logEntry + Environment.NewLine);
+        }
+
+        static void CopyDirectory(string sourceDir, string destDir)
+        {
+            Directory.CreateDirectory(destDir);
+
+            foreach (string file in Directory.GetFiles(sourceDir))
+            {
+                string destFile = Path.Combine(destDir, Path.GetFileName(file));
+                File.Copy(file, destFile, true);
+            }
+
+            foreach (string directory in Directory.GetDirectories(sourceDir))
+            {
+                string destSubDir = Path.Combine(destDir, Path.GetFileName(directory));
+                CopyDirectory(directory, destSubDir);
+            }
         }
     }
 }
-//Centralized Logging: Every command or signal produces a timestamped log entry.
+class Manifest
+{
+    public string Version { get; set; }
+}
+//A simple C# console-based game update system that supports:
 
-//State Machine: Transitions between IDLE, RUNNING, MAINTENANCE, UPDATING, and ERROR.
+//Installing update packages via CLI
 
-//CLI Harness: Accepts commands interactively (start_game, stop_game, signal door_open, update --package ..., etc.).
+//Manifest + version validation
 
-//Log Viewer: Type logs to see all recorded events.
+//Pre-install script execution (simulated)
 
-//Error Handling: Unknown commands trigger transition to ERROR.
+//Automatic rollback on failure
+
+//Version tracking
+
+//Install history logging
+
+// Project Overview
+
+//This project simulates a game update workflow similar to modern patching systems.
+
+//Core Features
+
+// Validate update package existence
+//Validate manifest + version
+//Execute pre-install hook
+//Rollback on failure
+//Maintain version state
+//Maintain install history log
+// Clear step-by-step logging
+
+
+//If pre-install succeeds:
+
+//Copy files into /game_versions/{version}
+
+//Update current_version
+
+//Update last_known_good_version
+
+//Update current symlink (or pointer file)
+
+
